@@ -71,28 +71,35 @@ if [[ ! -d "$DB_DATA_DIR/mysql" ]]; then
     mariadb-install-db --no-defaults \
       --datadir="$DB_DATA_DIR" \
       --auth-root-authentication-method=normal \
-      --skip-test-db \
-      --user="$(id -un)" >>"$DB_LOG" 2>&1 \
+      --skip-test-db >>"$DB_LOG" 2>&1 \
       || fail "MariaDB initialization failed. Check the console log above."
 fi
 
 if [[ ! -f "$DB_DATA_DIR/.pterodactyl-bootstrap-complete" ]]; then
     echo "[PTERO-DB] Setting the initial MariaDB root password..."
-    ROOT_PASSWORD_HEX="$(printf '%s' "$MARIADB_ROOT_PASSWORD" | od -An -tx1 | tr -d ' \n')"
+    SQL_FILE="$RUN_DIR/bootstrap.sql"
+    ESCAPED_ROOT_PASSWORD="${MARIADB_ROOT_PASSWORD//\'/\'\'}"
+    cat > "$SQL_FILE" <<SQL
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${ESCAPED_ROOT_PASSWORD}';
+CREATE OR REPLACE USER 'root'@'127.0.0.1' IDENTIFIED BY '${ESCAPED_ROOT_PASSWORD}';
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
+FLUSH PRIVILEGES;
+SQL
+    chmod 0600 "$SQL_FILE"
+
     BOOTSTRAP_PID=""
     mariadbd --no-defaults \
-      --user="$(id -un)" \
       --datadir="$DB_DATA_DIR" \
       --socket="$SOCKET" \
       --pid-file="$RUN_DIR/mariadb-bootstrap.pid" \
       --tmpdir="$TMP_DIR" \
-      --skip-networking \
-      --skip-grant-tables >>"$DB_LOG" 2>&1 &
+      --skip-networking >>"$DB_LOG" 2>&1 &
     BOOTSTRAP_PID=$!
 
     BOOTSTRAP_READY=0
     for _ in $(seq 1 90); do
-        if mariadb-admin --no-defaults --protocol=socket --socket="$SOCKET" -u root ping >/dev/null 2>&1; then
+        if mariadb-admin --no-defaults --protocol=socket --socket="$SOCKET" -u root ping >/dev/null 2>&1 || \
+           MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-admin --no-defaults --protocol=socket --socket="$SOCKET" -u root ping >/dev/null 2>&1; then
             BOOTSTRAP_READY=1
             break
         fi
@@ -110,28 +117,20 @@ if [[ ! -f "$DB_DATA_DIR/.pterodactyl-bootstrap-complete" ]]; then
         fail "Could not start temporary MariaDB bootstrap process."
     fi
 
-    SQL_FILE="$RUN_DIR/bootstrap.sql"
-    cat > "$SQL_FILE" <<SQL
-FLUSH PRIVILEGES;
-ALTER USER 'root'@'localhost' IDENTIFIED BY 0x${ROOT_PASSWORD_HEX};
-CREATE OR REPLACE USER 'root'@'127.0.0.1' IDENTIFIED BY 0x${ROOT_PASSWORD_HEX};
-GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
-FLUSH PRIVILEGES;
-SQL
-    chmod 0600 "$SQL_FILE"
-
-    if ! mariadb --no-defaults --protocol=socket --socket="$SOCKET" -u root < "$SQL_FILE"; then
-        rm -f "$SQL_FILE"
-        kill "$BOOTSTRAP_PID" 2>/dev/null || true
-        wait "$BOOTSTRAP_PID" 2>/dev/null || true
-        tail -n 80 "$DB_LOG" >&2 || true
-        fail "Could not configure the initial MariaDB accounts."
+    if ! mariadb --no-defaults --protocol=socket --socket="$SOCKET" -u root < "$SQL_FILE" 2>/dev/null; then
+        if ! MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb --no-defaults --protocol=socket --socket="$SOCKET" -u root < "$SQL_FILE"; then
+            rm -f "$SQL_FILE"
+            kill "$BOOTSTRAP_PID" 2>/dev/null || true
+            wait "$BOOTSTRAP_PID" 2>/dev/null || true
+            tail -n 80 "$DB_LOG" >&2 || true
+            fail "Could not configure the initial MariaDB accounts."
+        fi
     fi
     rm -f "$SQL_FILE"
 
     if ! MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-admin --no-defaults \
       --protocol=socket --socket="$SOCKET" -u root shutdown >/dev/null 2>&1; then
-        kill "$BOOTSTRAP_PID" 2>/dev/null || true
+        mariadb-admin --no-defaults --protocol=socket --socket="$SOCKET" -u root shutdown >/dev/null 2>&1 || true
     fi
     wait "$BOOTSTRAP_PID" 2>/dev/null || true
     BOOTSTRAP_PID=""
@@ -173,7 +172,6 @@ source /etc/apache2/envvars
 apache2ctl -t || fail "Apache configuration is invalid. Check PMA_PORT and the Apache logs."
 
 mariadbd --no-defaults \
-  --user="$(id -un)" \
   --datadir="$DB_DATA_DIR" \
   --port="$SERVER_PORT" \
   --bind-address=0.0.0.0 \
@@ -193,8 +191,15 @@ for _ in $(seq 1 90); do
         DB_READY=1
         break
     fi
-    if ! kill -0 "$DB_PID" 2>/dev/null || ! kill -0 "$APACHE_PID" 2>/dev/null; then
-        break
+    if ! kill -0 "$DB_PID" 2>/dev/null; then
+        echo "[PTERO-DB] MariaDB process died unexpectedly. Recent log:" >&2
+        tail -n 80 "$DB_LOG" >&2 || true
+        fail "MariaDB failed to start on port $SERVER_PORT."
+    fi
+    if ! kill -0 "$APACHE_PID" 2>/dev/null; then
+        echo "[PTERO-DB] Apache process died unexpectedly. Recent error log:" >&2
+        tail -n 80 "$APACHE_ERROR_LOG" >&2 || true
+        fail "Apache failed to start."
     fi
     sleep 1
 done

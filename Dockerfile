@@ -77,6 +77,9 @@ APACHECONF
 RUN a2enmod php8.2 >/dev/null
 RUN a2ensite 000-pma >/dev/null
 
+RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf \
+    && sed -i 's|^;*session.save_path = .*|session.save_path = "/home/container/.tmp"|' /etc/php/*/apache2/php.ini
+
 COPY entrypoint.sh /usr/local/bin/pterodactyl-mariadb-pma
 RUN chmod 0755 /usr/local/bin/pterodactyl-mariadb-pma \
     && chown -R container:container /home/container
