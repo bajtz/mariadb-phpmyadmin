@@ -145,20 +145,30 @@ if [[ ! -s "$PMA_SECRET_FILE" ]]; then
 fi
 PMA_SECRET="$(tr -d '\r\n' < "$PMA_SECRET_FILE")"
 
-cat > "$PMA_APP_DIR/config.inc.php" <<PHP
-<?php
+# Create socket symlinks so any socket-based connection finds MariaDB
+mkdir -p /var/run/mysqld /tmp 2>/dev/null || true
+ln -sf "$SOCKET" /var/run/mysqld/mysqld.sock 2>/dev/null || true
+ln -sf "$SOCKET" /tmp/mysql.sock 2>/dev/null || true
+
+PMA_CONFIG_TEXT="<?php
 \$cfg['blowfish_secret'] = '${PMA_SECRET}';
 \$i = 1;
 \$cfg['Servers'][\$i]['auth_type'] = 'cookie';
 \$cfg['Servers'][\$i]['host'] = '127.0.0.1';
 \$cfg['Servers'][\$i]['port'] = (int) (getenv('SERVER_PORT') ?: '3306');
 \$cfg['Servers'][\$i]['connect_type'] = 'tcp';
+\$cfg['Servers'][\$i]['socket'] = '${SOCKET}';
 \$cfg['Servers'][\$i]['compress'] = false;
 \$cfg['Servers'][\$i]['AllowNoPassword'] = false;
 \$cfg['TempDir'] = '${TMP_DIR}';
 \$cfg['UploadDir'] = '';
 \$cfg['SaveDir'] = '';
-PHP
+"
+
+printf '%s' "$PMA_CONFIG_TEXT" > "$PMA_APP_DIR/config.inc.php"
+printf '%s' "$PMA_CONFIG_TEXT" > /etc/phpmyadmin/config.inc.php
+echo "<?php" > /etc/phpmyadmin/config-db.php
+
 chmod 0644 "$PMA_APP_DIR/config.inc.php" 2>/dev/null || true
 chmod 0644 /etc/phpmyadmin/config-db.php 2>/dev/null || true
 chmod 0644 /etc/phpmyadmin/config.inc.php 2>/dev/null || true
