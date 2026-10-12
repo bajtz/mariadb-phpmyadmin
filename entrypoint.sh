@@ -145,9 +145,7 @@ if [[ ! -s "$PMA_SECRET_FILE" ]]; then
 fi
 PMA_SECRET="$(tr -d '\r\n' < "$PMA_SECRET_FILE")"
 
-# Create socket symlinks so any socket-based connection finds MariaDB
-mkdir -p /var/run/mysqld /tmp 2>/dev/null || true
-ln -sf "$SOCKET" /var/run/mysqld/mysqld.sock 2>/dev/null || true
+# Create socket symlink in /tmp so any fallback socket connection finds MariaDB
 ln -sf "$SOCKET" /tmp/mysql.sock 2>/dev/null || true
 
 PMA_CONFIG_TEXT="<?php
@@ -166,13 +164,7 @@ PMA_CONFIG_TEXT="<?php
 "
 
 printf '%s' "$PMA_CONFIG_TEXT" > "$PMA_APP_DIR/config.inc.php"
-printf '%s' "$PMA_CONFIG_TEXT" > /etc/phpmyadmin/config.inc.php
-echo "<?php" > /etc/phpmyadmin/config-db.php
-
 chmod 0644 "$PMA_APP_DIR/config.inc.php" 2>/dev/null || true
-chmod 0644 /etc/phpmyadmin/config-db.php 2>/dev/null || true
-chmod 0644 /etc/phpmyadmin/config.inc.php 2>/dev/null || true
-chmod 0644 /var/lib/phpmyadmin/blowfish_secret.inc.php 2>/dev/null || true
 
 # Apache expands PMA_PORT from the container environment while parsing ports.conf and the vhost.
 export APACHE_CONFDIR="/etc/apache2"
