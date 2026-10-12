@@ -76,61 +76,19 @@ if [[ ! -d "$DB_DATA_DIR/mysql" ]]; then
       || fail "MariaDB initialization failed. Check the console log above."
 fi
 
-if [[ ! -f "$DB_DATA_DIR/.pterodactyl-bootstrap-complete" ]]; then
-    echo "[PTERO-DB] Setting the initial MariaDB root password..."
-    SQL_FILE="$RUN_DIR/bootstrap.sql"
-    ESCAPED_ROOT_PASSWORD="${MARIADB_ROOT_PASSWORD//\'/\'\'}"
-    cat > "$SQL_FILE" <<SQL
+# Prepare user configuration SQL to run on every start
+INIT_FILE="$RUN_DIR/init.sql"
+ESCAPED_ROOT_PASSWORD="${MARIADB_ROOT_PASSWORD//\'/\'\'}"
+cat > "$INIT_FILE" <<SQL
 CREATE OR REPLACE USER 'root'@'localhost' IDENTIFIED BY '${ESCAPED_ROOT_PASSWORD}';
 CREATE OR REPLACE USER 'root'@'127.0.0.1' IDENTIFIED BY '${ESCAPED_ROOT_PASSWORD}';
+CREATE OR REPLACE USER 'root'@'%' IDENTIFIED BY '${ESCAPED_ROOT_PASSWORD}';
 GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION;
 GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 SQL
-    chmod 0600 "$SQL_FILE"
-
-    BOOTSTRAP_PID=""
-    mariadbd --no-defaults \
-      --datadir="$DB_DATA_DIR" \
-      --socket="$SOCKET" \
-      --pid-file="$RUN_DIR/mariadb-bootstrap.pid" \
-      --tmpdir="$TMP_DIR" \
-      --skip-networking \
-      --init-file="$SQL_FILE" >>"$DB_LOG" 2>&1 &
-    BOOTSTRAP_PID=$!
-
-    BOOTSTRAP_READY=0
-    for _ in $(seq 1 90); do
-        if MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-admin --no-defaults \
-           --protocol=socket --socket="$SOCKET" -u root ping >/dev/null 2>&1; then
-            BOOTSTRAP_READY=1
-            break
-        fi
-        if ! kill -0 "$BOOTSTRAP_PID" 2>/dev/null; then
-            break
-        fi
-        sleep 1
-    done
-
-    rm -f "$SQL_FILE"
-
-    if (( BOOTSTRAP_READY == 0 )); then
-        echo "[PTERO-DB] MariaDB bootstrap did not become ready. Recent log:"
-        tail -n 80 "$DB_LOG" >&2 || true
-        kill "$BOOTSTRAP_PID" 2>/dev/null || true
-        wait "$BOOTSTRAP_PID" 2>/dev/null || true
-        fail "Could not start temporary MariaDB bootstrap process."
-    fi
-
-    if ! MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-admin --no-defaults \
-      --protocol=socket --socket="$SOCKET" -u root shutdown >/dev/null 2>&1; then
-        kill "$BOOTSTRAP_PID" 2>/dev/null || true
-    fi
-    wait "$BOOTSTRAP_PID" 2>/dev/null || true
-    BOOTSTRAP_PID=""
-    touch "$DB_DATA_DIR/.pterodactyl-bootstrap-complete"
-    echo "[PTERO-DB] MariaDB bootstrap complete."
-fi
+chmod 0600 "$INIT_FILE"
 
 # Recreate the bundled app directory on each start so an image update also updates phpMyAdmin.
 rm -rf "$PMA_APP_DIR"
@@ -189,6 +147,7 @@ set -u
     fail "Apache configuration is invalid. Check PMA_PORT and the Apache logs."
 }
 
+echo "[PTERO-DB] Starting MariaDB service..."
 mariadbd --no-defaults \
   --datadir="$DB_DATA_DIR" \
   --port="$SERVER_PORT" \
@@ -196,16 +155,14 @@ mariadbd --no-defaults \
   --socket="$SOCKET" \
   --pid-file="$RUN_DIR/mariadb.pid" \
   --tmpdir="$TMP_DIR" \
-  --skip-name-resolve >>"$DB_LOG" 2>&1 &
+  --skip-name-resolve \
+  --init-file="$INIT_FILE" >>"$DB_LOG" 2>&1 &
 DB_PID=$!
-
-/usr/sbin/apache2 -DFOREGROUND &
-APACHE_PID=$!
 
 DB_READY=0
 for _ in $(seq 1 90); do
-    if MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-admin --no-defaults \
-      --protocol=tcp -h 127.0.0.1 -P "$SERVER_PORT" -u root ping >/dev/null 2>&1; then
+    if MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb --no-defaults \
+      --protocol=tcp -h 127.0.0.1 -P "$SERVER_PORT" -u root -e "SELECT 1" >/dev/null 2>&1; then
         DB_READY=1
         break
     fi
@@ -214,17 +171,18 @@ for _ in $(seq 1 90); do
         tail -n 80 "$DB_LOG" >&2 || true
         fail "MariaDB failed to start on port $SERVER_PORT."
     fi
-    if ! kill -0 "$APACHE_PID" 2>/dev/null; then
-        echo "[PTERO-DB] Apache process died unexpectedly. Recent error log:" >&2
-        tail -n 80 "$APACHE_ERROR_LOG" >&2 || true
-        fail "Apache failed to start."
-    fi
     sleep 1
 done
+rm -f "$INIT_FILE"
+
 (( DB_READY == 1 )) || {
     tail -n 80 "$DB_LOG" >&2 || true
-    fail "MariaDB did not become ready on port $SERVER_PORT."
+    fail "MariaDB did not become ready or root login failed on port $SERVER_PORT."
 }
+
+echo "[PTERO-DB] Starting Apache / phpMyAdmin service..."
+/usr/sbin/apache2 -DFOREGROUND &
+APACHE_PID=$!
 
 PMA_READY=0
 for _ in $(seq 1 45); do
