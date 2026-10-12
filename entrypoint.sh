@@ -150,14 +150,26 @@ ln -sf "$SOCKET" /tmp/mysql.sock 2>/dev/null || true
 
 PMA_CONFIG_TEXT="<?php
 \$cfg['blowfish_secret'] = '${PMA_SECRET}';
+
 \$i = 1;
+\$cfg['Servers'][\$i]['verbose'] = 'MariaDB TCP (${SERVER_PORT})';
 \$cfg['Servers'][\$i]['auth_type'] = 'cookie';
 \$cfg['Servers'][\$i]['host'] = '127.0.0.1';
-\$cfg['Servers'][\$i]['port'] = (int) (getenv('SERVER_PORT') ?: '3306');
+\$cfg['Servers'][\$i]['port'] = ${SERVER_PORT};
 \$cfg['Servers'][\$i]['connect_type'] = 'tcp';
 \$cfg['Servers'][\$i]['socket'] = '${SOCKET}';
 \$cfg['Servers'][\$i]['compress'] = false;
 \$cfg['Servers'][\$i]['AllowNoPassword'] = false;
+
+\$i = 2;
+\$cfg['Servers'][\$i]['verbose'] = 'MariaDB Socket';
+\$cfg['Servers'][\$i]['auth_type'] = 'cookie';
+\$cfg['Servers'][\$i]['host'] = 'localhost';
+\$cfg['Servers'][\$i]['socket'] = '${SOCKET}';
+\$cfg['Servers'][\$i]['connect_type'] = 'socket';
+\$cfg['Servers'][\$i]['compress'] = false;
+\$cfg['Servers'][\$i]['AllowNoPassword'] = false;
+
 \$cfg['TempDir'] = '${TMP_DIR}';
 \$cfg['UploadDir'] = '';
 \$cfg['SaveDir'] = '';
