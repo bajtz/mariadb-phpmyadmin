@@ -159,7 +159,10 @@ cat > "$PMA_APP_DIR/config.inc.php" <<PHP
 \$cfg['UploadDir'] = '';
 \$cfg['SaveDir'] = '';
 PHP
-chmod 0600 "$PMA_APP_DIR/config.inc.php"
+chmod 0644 "$PMA_APP_DIR/config.inc.php" 2>/dev/null || true
+chmod 0644 /etc/phpmyadmin/config-db.php 2>/dev/null || true
+chmod 0644 /etc/phpmyadmin/config.inc.php 2>/dev/null || true
+chmod 0644 /var/lib/phpmyadmin/blowfish_secret.inc.php 2>/dev/null || true
 
 # Apache expands PMA_PORT from the container environment while parsing ports.conf and the vhost.
 export APACHE_CONFDIR="/etc/apache2"

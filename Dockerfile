@@ -88,8 +88,9 @@ RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf \
     && sed -i 's|^;*session.save_path = .*|session.save_path = "/home/container/.tmp"|' /etc/php/*/apache2/php.ini \
     && mkdir -p /var/lib/phpmyadmin /etc/phpmyadmin \
     && touch /var/lib/phpmyadmin/blowfish_secret.inc.php /etc/phpmyadmin/config-db.php \
-    && chmod -R 777 /var/lib/phpmyadmin /etc/phpmyadmin /usr/share/javascript 2>/dev/null || true \
     && chown -R container:container /var/lib/phpmyadmin /etc/phpmyadmin 2>/dev/null || true \
+    && chmod -R 755 /var/lib/phpmyadmin /etc/phpmyadmin /usr/share/javascript 2>/dev/null || true \
+    && chmod 644 /var/lib/phpmyadmin/blowfish_secret.inc.php /etc/phpmyadmin/config-db.php 2>/dev/null || true \
     && printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/chown \
     && chmod 0755 /usr/local/bin/chown
 
