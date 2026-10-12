@@ -33,6 +33,7 @@ valid_port "$PMA_PORT" || fail "PMA_PORT must be an integer between 1024 and 655
 (( ${#MARIADB_ROOT_PASSWORD} >= 12 )) || fail "MARIADB_ROOT_PASSWORD must contain at least 12 characters."
 
 mkdir -p "$DB_DATA_DIR" "$RUN_DIR/apache2" "$RUN_DIR/lock" "$TMP_DIR" "$LOG_DIR/apache2"
+chmod 0777 "$TMP_DIR" 2>/dev/null || chmod 777 "$TMP_DIR" 2>/dev/null || true
 touch "$DB_LOG" "$APACHE_ERROR_LOG" "$APACHE_ACCESS_LOG"
 
 # Run-time logs are tailed to stdout/stderr so they are visible in the Pterodactyl console.
@@ -95,6 +96,30 @@ echo "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;\n";
 echo "FLUSH PRIVILEGES;\n";
 PHP
 chmod 0600 "$INIT_FILE"
+
+# Provide a user-configurable php.ini in the Pterodactyl file manager root
+PHP_INI_FILE="$HOME/php.ini"
+if [[ ! -f "$PHP_INI_FILE" ]]; then
+    cat > "$PHP_INI_FILE" <<'EOF'
+session.save_path = "/home/container/.tmp"
+upload_tmp_dir = "/home/container/.tmp"
+upload_max_filesize = 128M
+post_max_size = 128M
+memory_limit = 512M
+max_execution_time = 300
+max_input_time = 300
+max_input_vars = 5000
+date.timezone = UTC
+EOF
+    chmod 0644 "$PHP_INI_FILE" 2>/dev/null || true
+else
+    if ! grep -q "session.save_path" "$PHP_INI_FILE"; then
+        echo 'session.save_path = "/home/container/.tmp"' >> "$PHP_INI_FILE"
+    fi
+    if ! grep -q "upload_tmp_dir" "$PHP_INI_FILE"; then
+        echo 'upload_tmp_dir = "/home/container/.tmp"' >> "$PHP_INI_FILE"
+    fi
+fi
 
 # Recreate the bundled app directory on each start so an image update also updates phpMyAdmin.
 rm -rf "$PMA_APP_DIR"

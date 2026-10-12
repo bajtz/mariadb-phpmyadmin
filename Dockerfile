@@ -63,6 +63,9 @@ RUN cat > /etc/apache2/sites-available/000-pma.conf <<'APACHECONF'
     DocumentRoot /home/container/.phpmyadmin-app
     DirectoryIndex index.php index.html
 
+    php_admin_value session.save_path "/home/container/.tmp"
+    php_admin_value upload_tmp_dir "/home/container/.tmp"
+
     <Directory /home/container/.phpmyadmin-app>
         Options FollowSymLinks
         AllowOverride All
@@ -88,7 +91,14 @@ RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf \
     && sed -i 's|^;*session.save_path = .*|session.save_path = "/home/container/.tmp"|' /etc/php/*/apache2/php.ini \
     && sed -i 's|^;*mysqli.default_socket = .*|mysqli.default_socket = "/home/container/.run/mariadb.sock"|' /etc/php/*/apache2/php.ini \
     && sed -i 's|^;*pdo_mysql.default_socket = .*|pdo_mysql.default_socket = "/home/container/.run/mariadb.sock"|' /etc/php/*/apache2/php.ini \
-    && mkdir -p /var/lib/phpmyadmin /etc/phpmyadmin /var/run/mysqld \
+    && for conf_dir in /etc/php/*/apache2/conf.d /etc/php/*/cli/conf.d; do \
+        if [ -d "$conf_dir" ]; then \
+            ln -sf /home/container/php.ini "$conf_dir/99-custom.ini"; \
+        fi; \
+    done \
+    && mkdir -p /var/lib/phpmyadmin /etc/phpmyadmin /var/run/mysqld /var/lib/php \
+    && rm -rf /var/lib/php/sessions \
+    && ln -sf /home/container/.tmp /var/lib/php/sessions \
     && echo "<?php" > /var/lib/phpmyadmin/blowfish_secret.inc.php \
     && echo "<?php" > /etc/phpmyadmin/config-db.php \
     && rm -f /etc/phpmyadmin/config.inc.php \
@@ -99,6 +109,20 @@ RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf \
     && chmod 644 /var/lib/phpmyadmin/blowfish_secret.inc.php /etc/phpmyadmin/config-db.php 2>/dev/null || true \
     && printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/chown \
     && chmod 0755 /usr/local/bin/chown
+
+RUN printf '%s\n' \
+      'session.save_path = "/home/container/.tmp"' \
+      'upload_tmp_dir = "/home/container/.tmp"' \
+      'upload_max_filesize = 128M' \
+      'post_max_size = 128M' \
+      'memory_limit = 512M' \
+      'max_execution_time = 300' \
+      'max_input_time = 300' \
+      'max_input_vars = 5000' \
+      'date.timezone = UTC' \
+      > /home/container/php.ini \
+    && chown container:container /home/container/php.ini \
+    && chmod 0644 /home/container/php.ini
 
 COPY entrypoint.sh /usr/local/bin/pterodactyl-mariadb-pma
 RUN chmod 0755 /usr/local/bin/pterodactyl-mariadb-pma \
