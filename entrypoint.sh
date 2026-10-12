@@ -5,6 +5,7 @@ umask 077
 HOME="${HOME:-/home/container}"
 SERVER_PORT="${SERVER_PORT:-3306}"
 PMA_PORT="${PMA_PORT:-8080}"
+export SERVER_PORT PMA_PORT
 MARIADB_ROOT_PASSWORD="${MARIADB_ROOT_PASSWORD:-}"
 DB_DATA_DIR="${MARIADB_DATA_DIR:-$HOME/.mariadb}"
 PMA_APP_DIR="$HOME/.phpmyadmin-app"
@@ -161,7 +162,10 @@ PHP
 chmod 0600 "$PMA_APP_DIR/config.inc.php"
 
 # Apache expands PMA_PORT from the container environment while parsing ports.conf and the vhost.
+export APACHE_CONFDIR="/etc/apache2"
+set +u
 source /etc/apache2/envvars
+set -u
 apache2ctl -t || fail "Apache configuration is invalid. Check PMA_PORT and the Apache logs."
 
 mariadbd --no-defaults \
