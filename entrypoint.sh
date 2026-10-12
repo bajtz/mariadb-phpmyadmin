@@ -80,20 +80,19 @@ fi
 
 # Prepare user configuration SQL to run on every start
 INIT_FILE="$RUN_DIR/init.sql"
-php - "$INIT_FILE" <<'PHP'
+php <<'PHP' > "$INIT_FILE"
 <?php
 $pass = getenv('MARIADB_ROOT_PASSWORD');
 $escaped = str_replace(['\\', "\x00", "'"], ['\\\\', '\\0', "\\'"], $pass);
-$sql = "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n"
-     . "CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n"
-     . "ALTER USER 'root'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n"
-     . "CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n"
-     . "ALTER USER 'root'@'%' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n"
-     . "GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION;\n"
-     . "GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;\n"
-     . "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;\n"
-     . "FLUSH PRIVILEGES;\n";
-file_put_contents($argv[1], $sql);
+echo "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n";
+echo "CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n";
+echo "ALTER USER 'root'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n";
+echo "CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n";
+echo "ALTER USER 'root'@'%' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n";
+echo "GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION;\n";
+echo "GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;\n";
+echo "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;\n";
+echo "FLUSH PRIVILEGES;\n";
 PHP
 chmod 0600 "$INIT_FILE"
 
