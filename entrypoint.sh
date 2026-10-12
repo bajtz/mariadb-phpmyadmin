@@ -58,6 +58,8 @@ cleanup() {
     if [[ -n "${DB_PID:-}" ]] && kill -0 "$DB_PID" 2>/dev/null; then
         MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-admin --no-defaults \
           --protocol=tcp -h 127.0.0.1 -P "$SERVER_PORT" -u root shutdown >/dev/null 2>&1 \
+          || MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-admin --no-defaults \
+          --protocol=socket --socket="$SOCKET" -u root shutdown >/dev/null 2>&1 \
           || kill -TERM "$DB_PID" 2>/dev/null || true
     fi
 
@@ -78,16 +80,21 @@ fi
 
 # Prepare user configuration SQL to run on every start
 INIT_FILE="$RUN_DIR/init.sql"
-ESCAPED_ROOT_PASSWORD="${MARIADB_ROOT_PASSWORD//\'/\'\'}"
-cat > "$INIT_FILE" <<SQL
-CREATE OR REPLACE USER 'root'@'localhost' IDENTIFIED BY '${ESCAPED_ROOT_PASSWORD}';
-CREATE OR REPLACE USER 'root'@'127.0.0.1' IDENTIFIED BY '${ESCAPED_ROOT_PASSWORD}';
-CREATE OR REPLACE USER 'root'@'%' IDENTIFIED BY '${ESCAPED_ROOT_PASSWORD}';
-GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION;
-GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
-GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;
-FLUSH PRIVILEGES;
-SQL
+php - "$INIT_FILE" <<'PHP'
+<?php
+$pass = getenv('MARIADB_ROOT_PASSWORD');
+$escaped = str_replace(['\\', "\x00", "'"], ['\\\\', '\\0', "\\'"], $pass);
+$sql = "ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n"
+     . "CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n"
+     . "ALTER USER 'root'@'127.0.0.1' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n"
+     . "CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n"
+     . "ALTER USER 'root'@'%' IDENTIFIED VIA mysql_native_password USING PASSWORD('" . $escaped . "');\n"
+     . "GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION;\n"
+     . "GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;\n"
+     . "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;\n"
+     . "FLUSH PRIVILEGES;\n";
+file_put_contents($argv[1], $sql);
+PHP
 chmod 0600 "$INIT_FILE"
 
 # Recreate the bundled app directory on each start so an image update also updates phpMyAdmin.
@@ -160,12 +167,20 @@ mariadbd --no-defaults \
 DB_PID=$!
 
 DB_READY=0
-for _ in $(seq 1 90); do
+for i in $(seq 1 90); do
     if MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb --no-defaults \
       --protocol=tcp -h 127.0.0.1 -P "$SERVER_PORT" -u root -e "SELECT 1" >/dev/null 2>&1; then
         DB_READY=1
         break
     fi
+
+    # After the socket is created, apply init.sql directly over the socket if TCP authentication is pending
+    if [[ -S "$SOCKET" ]] && (( i >= 3 )); then
+        mariadb --no-defaults --socket="$SOCKET" -u root < "$INIT_FILE" >/dev/null 2>&1 \
+          || MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb --no-defaults --socket="$SOCKET" -u root < "$INIT_FILE" >/dev/null 2>&1 \
+          || true
+    fi
+
     if ! kill -0 "$DB_PID" 2>/dev/null; then
         echo "[PTERO-DB] MariaDB process died unexpectedly. Recent log:" >&2
         tail -n 80 "$DB_LOG" >&2 || true
@@ -176,6 +191,9 @@ done
 rm -f "$INIT_FILE"
 
 (( DB_READY == 1 )) || {
+    echo "[PTERO-DB] Failed to authenticate or verify connection on port $SERVER_PORT:" >&2
+    MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb --no-defaults \
+      --protocol=tcp -h 127.0.0.1 -P "$SERVER_PORT" -u root -e "SELECT 1" >&2 || true
     tail -n 80 "$DB_LOG" >&2 || true
     fail "MariaDB did not become ready or root login failed on port $SERVER_PORT."
 }
