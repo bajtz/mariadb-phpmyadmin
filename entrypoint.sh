@@ -80,8 +80,9 @@ if [[ ! -f "$DB_DATA_DIR/.pterodactyl-bootstrap-complete" ]]; then
     SQL_FILE="$RUN_DIR/bootstrap.sql"
     ESCAPED_ROOT_PASSWORD="${MARIADB_ROOT_PASSWORD//\'/\'\'}"
     cat > "$SQL_FILE" <<SQL
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${ESCAPED_ROOT_PASSWORD}';
+CREATE OR REPLACE USER 'root'@'localhost' IDENTIFIED BY '${ESCAPED_ROOT_PASSWORD}';
 CREATE OR REPLACE USER 'root'@'127.0.0.1' IDENTIFIED BY '${ESCAPED_ROOT_PASSWORD}';
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION;
 GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 SQL
@@ -93,13 +94,14 @@ SQL
       --socket="$SOCKET" \
       --pid-file="$RUN_DIR/mariadb-bootstrap.pid" \
       --tmpdir="$TMP_DIR" \
-      --skip-networking >>"$DB_LOG" 2>&1 &
+      --skip-networking \
+      --init-file="$SQL_FILE" >>"$DB_LOG" 2>&1 &
     BOOTSTRAP_PID=$!
 
     BOOTSTRAP_READY=0
     for _ in $(seq 1 90); do
-        if mariadb-admin --no-defaults --protocol=socket --socket="$SOCKET" -u root ping >/dev/null 2>&1 || \
-           MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-admin --no-defaults --protocol=socket --socket="$SOCKET" -u root ping >/dev/null 2>&1; then
+        if MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-admin --no-defaults \
+           --protocol=socket --socket="$SOCKET" -u root ping >/dev/null 2>&1; then
             BOOTSTRAP_READY=1
             break
         fi
@@ -109,6 +111,8 @@ SQL
         sleep 1
     done
 
+    rm -f "$SQL_FILE"
+
     if (( BOOTSTRAP_READY == 0 )); then
         echo "[PTERO-DB] MariaDB bootstrap did not become ready. Recent log:"
         tail -n 80 "$DB_LOG" >&2 || true
@@ -117,20 +121,9 @@ SQL
         fail "Could not start temporary MariaDB bootstrap process."
     fi
 
-    if ! mariadb --no-defaults --protocol=socket --socket="$SOCKET" -u root < "$SQL_FILE" 2>/dev/null; then
-        if ! MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb --no-defaults --protocol=socket --socket="$SOCKET" -u root < "$SQL_FILE"; then
-            rm -f "$SQL_FILE"
-            kill "$BOOTSTRAP_PID" 2>/dev/null || true
-            wait "$BOOTSTRAP_PID" 2>/dev/null || true
-            tail -n 80 "$DB_LOG" >&2 || true
-            fail "Could not configure the initial MariaDB accounts."
-        fi
-    fi
-    rm -f "$SQL_FILE"
-
     if ! MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-admin --no-defaults \
       --protocol=socket --socket="$SOCKET" -u root shutdown >/dev/null 2>&1; then
-        mariadb-admin --no-defaults --protocol=socket --socket="$SOCKET" -u root shutdown >/dev/null 2>&1 || true
+        kill "$BOOTSTRAP_PID" 2>/dev/null || true
     fi
     wait "$BOOTSTRAP_PID" 2>/dev/null || true
     BOOTSTRAP_PID=""
