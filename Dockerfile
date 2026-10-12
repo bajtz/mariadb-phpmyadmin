@@ -69,6 +69,12 @@ RUN cat > /etc/apache2/sites-available/000-pma.conf <<'APACHECONF'
         Require all granted
     </Directory>
 
+    <Directory /usr/share/javascript>
+        Options FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
     ErrorLog ${APACHE_LOG_DIR}/error.log
     CustomLog ${APACHE_LOG_DIR}/access.log combined
 </VirtualHost>
@@ -80,6 +86,10 @@ RUN a2ensite 000-pma >/dev/null
 RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf \
     && sed -i -e 's|^User |#User |' -e 's|^Group |#Group |' /etc/apache2/apache2.conf \
     && sed -i 's|^;*session.save_path = .*|session.save_path = "/home/container/.tmp"|' /etc/php/*/apache2/php.ini \
+    && mkdir -p /var/lib/phpmyadmin /etc/phpmyadmin \
+    && touch /var/lib/phpmyadmin/blowfish_secret.inc.php /etc/phpmyadmin/config-db.php \
+    && chmod -R 777 /var/lib/phpmyadmin /etc/phpmyadmin /usr/share/javascript 2>/dev/null || true \
+    && chown -R container:container /var/lib/phpmyadmin /etc/phpmyadmin 2>/dev/null || true \
     && printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/chown \
     && chmod 0755 /usr/local/bin/chown
 

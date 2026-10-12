@@ -135,7 +135,7 @@ fi
 # Recreate the bundled app directory on each start so an image update also updates phpMyAdmin.
 rm -rf "$PMA_APP_DIR"
 mkdir -p "$PMA_APP_DIR"
-cp -r /usr/share/phpmyadmin/. "$PMA_APP_DIR/"
+cp -r -L /usr/share/phpmyadmin/. "$PMA_APP_DIR/"
 rm -f "$PMA_APP_DIR/config.inc.php"
 
 PMA_SECRET_FILE="$HOME/.phpmyadmin-blowfish-secret"
