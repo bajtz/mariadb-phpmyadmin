@@ -78,7 +78,10 @@ RUN a2enmod php8.2 >/dev/null
 RUN a2ensite 000-pma >/dev/null
 
 RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf \
-    && sed -i 's|^;*session.save_path = .*|session.save_path = "/home/container/.tmp"|' /etc/php/*/apache2/php.ini
+    && sed -i -e 's|^User |#User |' -e 's|^Group |#Group |' /etc/apache2/apache2.conf \
+    && sed -i 's|^;*session.save_path = .*|session.save_path = "/home/container/.tmp"|' /etc/php/*/apache2/php.ini \
+    && printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/chown \
+    && chmod 0755 /usr/local/bin/chown
 
 COPY entrypoint.sh /usr/local/bin/pterodactyl-mariadb-pma
 RUN chmod 0755 /usr/local/bin/pterodactyl-mariadb-pma \

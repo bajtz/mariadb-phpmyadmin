@@ -166,7 +166,11 @@ export APACHE_CONFDIR="/etc/apache2"
 set +u
 source /etc/apache2/envvars
 set -u
-apache2ctl -t || fail "Apache configuration is invalid. Check PMA_PORT and the Apache logs."
+/usr/sbin/apache2 -t || {
+    echo "[PTERO-DB] Apache configuration test failed. Recent error log:" >&2
+    tail -n 80 "$APACHE_ERROR_LOG" >&2 || true
+    fail "Apache configuration is invalid. Check PMA_PORT and the Apache logs."
+}
 
 mariadbd --no-defaults \
   --datadir="$DB_DATA_DIR" \
@@ -178,7 +182,7 @@ mariadbd --no-defaults \
   --skip-name-resolve >>"$DB_LOG" 2>&1 &
 DB_PID=$!
 
-apache2ctl -D FOREGROUND &
+/usr/sbin/apache2 -DFOREGROUND &
 APACHE_PID=$!
 
 DB_READY=0
